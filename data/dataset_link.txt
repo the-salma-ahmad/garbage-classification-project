@@ -1,0 +1,8 @@
+Dataset used in this project with train/validate/test-split (80/10/10) applied:
+
+Google Drive Link:
+https://drive.google.com/drive/folders/1HtsEXOkyO_fN8jbNwUiE0OFhX92oNAyK?usp=sharing
+
+Source: Kaggle 
+https://www.kaggle.com/datasets/manonstr/tipe-webscraping/data
+https://www.kaggle.com/datasets/mostafaabla/garbage-classification?select=garbage_classification
