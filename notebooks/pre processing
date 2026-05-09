@@ -1,0 +1,317 @@
+# ============================================================
+# PREPROCESSING PIPELINE — Garbage Classification
+# Smart Garbage Classification Project
+# 11 Classes | ~9,891 Images | Split: 80/10/10
+# ============================================================
+
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+DATASET_PATH = "/Users/mohamedhossam/Desktop/phase1-image/split_dataset"
+IMG_SIZE      = (224, 224)
+BATCH_SIZE    = 32
+NUM_CLASSES   = 5
+
+CLASSES = [
+    'clothes', 'glass', 'metal', 'paper', 'plastic'
+]
+
+# ============================================================
+# STEP 1 — HANDLE CORRUPTED / UNREADABLE IMAGES
+# This is required by the guidelines
+# ============================================================
+
+def check_and_remove_corrupted(dataset_path):
+    """
+    Scan all images in train/val/test folders.
+    Remove any file that OpenCV cannot read (corrupted).
+    """
+    dataset_path = Path(dataset_path)
+    total_checked = 0
+    total_removed = 0
+
+    print("=" * 55)
+    print("STEP 1 — Checking for Corrupted Images")
+    print("=" * 55)
+
+    for split in ["train", "val", "test"]:
+        for class_name in CLASSES:
+            folder = dataset_path / split / class_name
+
+            if not folder.exists():
+                continue
+
+            for img_file in folder.iterdir():
+                if img_file.suffix.lower() not in [".jpg", ".jpeg", ".png", ".bmp"]:
+                    continue
+
+                total_checked += 1
+                img = cv2.imread(str(img_file))
+
+                if img is None:
+                    print(f"  ✗ Corrupted → removed: {img_file.name}")
+                    img_file.unlink()
+                    total_removed += 1
+
+    print(f"\n  Total images checked : {total_checked}")
+    print(f"  Corrupted & removed  : {total_removed}")
+    print(f"  Clean images         : {total_checked - total_removed}")
+    print()
+
+
+# ============================================================
+# STEP 2 — CLASS BALANCE CHECK
+# Required by the guidelines: check imbalance & document it
+# ============================================================
+
+def check_class_balance(dataset_path, split="train"):
+    """
+    Count images per class in the given split.
+    Plot a bar chart showing class distribution.
+    """
+    dataset_path = Path(dataset_path)
+    counts = {}
+
+    print("=" * 55)
+    print(f"STEP 2 — Class Balance Check ({split} set)")
+    print("=" * 55)
+
+    for class_name in CLASSES:
+        folder = dataset_path / split / class_name
+        if folder.exists():
+            count = len([
+                f for f in folder.iterdir()
+                if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]
+            ])
+            counts[class_name] = count
+            print(f"  {class_name:<12} : {count} images")
+        else:
+            counts[class_name] = 0
+            print(f"  {class_name:<12} : folder not found")
+
+    total = sum(counts.values())
+    print(f"\n  Total ({split}) : {total} images")
+
+    # ── visualise ──────────────────────────────────────────
+    plt.figure(figsize=(12, 5))
+    bars = plt.bar(counts.keys(), counts.values(),
+                   color='steelblue', edgecolor='black')
+    plt.title(f"Class Distribution — {split.capitalize()} Set",
+              fontsize=14, fontweight='bold')
+    plt.xlabel("Class", fontsize=12)
+    plt.ylabel("Number of Images", fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+
+    for bar, val in zip(bars, counts.values()):
+        plt.text(bar.get_x() + bar.get_width() / 2,
+                 bar.get_height() + 5,
+                 str(val), ha='center', va='bottom', fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(f"class_distribution_{split}.png", dpi=150)
+    plt.show()
+    print(f"\n  Chart saved → class_distribution_{split}.png\n")
+
+    return counts
+
+
+# ============================================================
+# STEP 3 — SAMPLE IMAGES GRID
+# Show one sample from each class before augmentation
+# ============================================================
+
+def show_sample_images(dataset_path, split="train", n_per_row=4):
+    """
+    Display one sample image per class in a grid.
+    """
+    dataset_path = Path(dataset_path)
+    images, labels = [], []
+
+    for class_name in CLASSES:
+        folder = dataset_path / split / class_name
+        if not folder.exists():
+            continue
+        files = list(folder.iterdir())
+        if files:
+            img = cv2.imread(str(files[0]))
+            if img is not None:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = cv2.resize(img, IMG_SIZE)
+                images.append(img)
+                labels.append(class_name)
+
+    rows = (len(images) + n_per_row - 1) // n_per_row
+    fig, axes = plt.subplots(rows, n_per_row,
+                              figsize=(n_per_row * 3, rows * 3))
+    axes = axes.flatten()
+
+    for i, (img, label) in enumerate(zip(images, labels)):
+        axes[i].imshow(img)
+        axes[i].set_title(label, fontsize=10, fontweight='bold')
+        axes[i].axis('off')
+
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
+
+    plt.suptitle("Sample Images — One Per Class (Resized 224×224)",
+                 fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig("sample_images_grid.png", dpi=150)
+    plt.show()
+    print("  Sample grid saved → sample_images_grid.png\n")
+
+
+# ============================================================
+# STEP 4 — DATA AUGMENTATION + NORMALIZATION
+# Exactly as required by the guidelines:
+#   • Resize 224×224
+#   • Normalize [0,1]
+#   • Rotation, Flip, Zoom, Brightness
+#   • Train / Val / Test split already done on disk
+# ============================================================
+
+def build_data_generators(dataset_path):
+    """
+    Build ImageDataGenerators for train, val, and test splits.
+    Train → augmentation + normalization
+    Val/Test → normalization only (no augmentation on evaluation data)
+    """
+
+    # ── TRAIN: augmentation ───────────────────────────────
+    train_datagen = ImageDataGenerator(
+        rescale=1.0 / 255,          # Normalize [0, 1]
+        rotation_range=20,          # Random rotation ±20°
+        zoom_range=0.2,             # Random zoom 20%
+        horizontal_flip=True,       # Random horizontal flip
+        brightness_range=[0.8, 1.2] # Random brightness adjustment
+    )
+
+    # ── VAL & TEST: normalization only ────────────────────
+    val_test_datagen = ImageDataGenerator(
+        rescale=1.0 / 255           # Normalize [0, 1] only
+    )
+
+    # ── LOAD from directory ───────────────────────────────
+    train_data = train_datagen.flow_from_directory(
+        os.path.join(dataset_path, "train"),
+        target_size=IMG_SIZE,
+        batch_size=BATCH_SIZE,
+        class_mode='categorical',   # one-hot labels for 11 classes
+        shuffle=True
+    )
+
+    val_data = val_test_datagen.flow_from_directory(
+        os.path.join(dataset_path, "val"),
+        target_size=IMG_SIZE,
+        batch_size=BATCH_SIZE,
+        class_mode='categorical',
+        shuffle=False               # keep order for evaluation
+    )
+
+    test_data = val_test_datagen.flow_from_directory(
+        os.path.join(dataset_path, "test"),
+        target_size=IMG_SIZE,
+        batch_size=BATCH_SIZE,
+        class_mode='categorical',
+        shuffle=False
+    )
+
+    return train_data, val_data, test_data
+
+
+# ============================================================
+# STEP 5 — VISUALISE AUGMENTED SAMPLES
+# Show what the model actually sees after augmentation
+# ============================================================
+
+def show_augmented_samples(train_data, n=8):
+    """
+    Fetch one batch and display n augmented images.
+    """
+    images, labels = next(train_data)
+    class_names = list(train_data.class_indices.keys())
+
+    fig, axes = plt.subplots(2, n // 2, figsize=(n * 2, 5))
+    axes = axes.flatten()
+
+    for i in range(n):
+        axes[i].imshow(images[i])
+        label_idx = np.argmax(labels[i])
+        axes[i].set_title(class_names[label_idx], fontsize=9)
+        axes[i].axis('off')
+
+    plt.suptitle("Augmented Training Samples (Normalized [0,1])",
+                 fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig("augmented_samples.png", dpi=150)
+    plt.show()
+    print("  Augmented samples saved → augmented_samples.png\n")
+
+
+# ============================================================
+# STEP 6 — PRINT PREPROCESSING SUMMARY
+# ============================================================
+
+def print_preprocessing_summary(train_data, val_data, test_data):
+    print("\n" + "=" * 55)
+    print("PREPROCESSING SUMMARY")
+    print("=" * 55)
+    print(f"  Image Size         : {IMG_SIZE[0]} × {IMG_SIZE[1]} (RGB)")
+    print(f"  Normalization      : Pixel values scaled to [0, 1]")
+    print(f"  Batch Size         : {BATCH_SIZE}")
+    print(f"  Number of Classes  : {NUM_CLASSES}")
+    print()
+    print(f"  Train samples      : {train_data.samples}")
+    print(f"  Val   samples      : {val_data.samples}")
+    print(f"  Test  samples      : {test_data.samples}")
+    print()
+    print("  Train Augmentation :")
+    print("    ✓ Rotation  ±20°")
+    print("    ✓ Zoom       20%")
+    print("    ✓ Horizontal Flip")
+    print("    ✓ Brightness [0.8 – 1.2]")
+    print()
+    print("  Val/Test: No augmentation (normalization only)")
+    print("=" * 55)
+    print()
+
+
+# ============================================================
+# MAIN — RUN FULL PIPELINE
+# ============================================================
+
+if __name__ == "__main__":
+
+    print("\n" + "=" * 55)
+    print("   GARBAGE CLASSIFICATION — PREPROCESSING PIPELINE")
+    print("=" * 55 + "\n")
+
+    # Step 1 — Remove corrupted images
+    check_and_remove_corrupted(DATASET_PATH)
+
+    # Step 2 — Check class balance (train set)
+    check_class_balance(DATASET_PATH, split="train")
+
+    # Step 3 — Show one sample per class
+    show_sample_images(DATASET_PATH, split="train")
+
+    # Step 4 — Build data generators
+    train_data, val_data, test_data = build_data_generators(DATASET_PATH)
+
+    # Step 5 — Show augmented samples
+    show_augmented_samples(train_data, n=8)
+
+    # Step 6 — Print summary
+    print_preprocessing_summary(train_data, val_data, test_data)
+
+    print("✅ Preprocessing pipeline complete.")
+    print("   → train_data, val_data, test_data are ready for model training.\n")
