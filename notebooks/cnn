@@ -1,0 +1,376 @@
+# ============================================================
+# CNN FROM SCRATCH — Garbage Classification
+# Smart Garbage Classification Project
+# Architecture built layer-by-layer (no pre-trained weights)
+# Required by Project Guidelines Section 4.1
+# ============================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import time
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import (
+    Conv2D, MaxPooling2D, BatchNormalization,
+    Flatten, Dense, Dropout, Activation
+)
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+
+from sklearn.metrics import (
+    classification_report, confusion_matrix,
+    accuracy_score, precision_score, recall_score, f1_score
+)
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+NUM_CLASSES = 5
+IMG_SIZE    = (224, 224, 3)
+EPOCHS      = 5
+BATCH_SIZE  = 32
+
+CLASSES = [
+    'clothes', 'glass', 'metal', 'paper', 'plastic'
+]
+
+
+# ============================================================
+# BUILD CNN FROM SCRATCH
+# Every layer explicitly defined — no drag-and-drop
+# Architecture: Conv → BN → ReLU → Pool (× 3 blocks)
+#               → Flatten → Dense → Dropout → Output (Softmax)
+# ============================================================
+
+def build_cnn_from_scratch(input_shape=IMG_SIZE, num_classes=NUM_CLASSES):
+    """
+    Full CNN architecture built from scratch.
+
+    Block 1: 32 filters  → capture low-level features (edges, textures)
+    Block 2: 64 filters  → capture mid-level features (shapes)
+    Block 3: 128 filters → capture high-level features (object parts)
+    Block 4: 256 filters → capture complex patterns
+
+    Fully Connected Head:
+        Flatten → Dense(512) → Dropout(0.5) → Dense(256) → Output(Softmax)
+    """
+
+    model = Sequential(name="CNN_from_Scratch")
+
+    # ── BLOCK 1 ────────────────────────────────────────────
+    # Input: 224 × 224 × 3
+    model.add(Conv2D(32, (3, 3), padding='same', input_shape=input_shape))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(Conv2D(32, (3, 3), padding='same'))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    # Output: 112 × 112 × 32
+
+    # ── BLOCK 2 ────────────────────────────────────────────
+    model.add(Conv2D(64, (3, 3), padding='same'))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(Conv2D(64, (3, 3), padding='same'))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    # Output: 56 × 56 × 64
+
+    # ── BLOCK 3 ────────────────────────────────────────────
+    model.add(Conv2D(128, (3, 3), padding='same'))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(Conv2D(128, (3, 3), padding='same'))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    # Output: 28 × 28 × 128
+
+    # ── BLOCK 4 ────────────────────────────────────────────
+    model.add(Conv2D(256, (3, 3), padding='same'))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    # Output: 14 × 14 × 256
+
+    # ── CLASSIFIER HEAD ────────────────────────────────────
+    model.add(Flatten())
+    model.add(Dense(512))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(Dropout(0.5))          # reduce overfitting
+
+    model.add(Dense(256))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(Dropout(0.3))
+
+    # Output layer — Softmax for 11-class classification
+    model.add(Dense(num_classes, activation='softmax'))
+
+    return model
+
+
+# ============================================================
+# COMPILE MODEL
+# ============================================================
+
+def compile_model(model):
+    model.compile(
+        optimizer=Adam(learning_rate=0.001),
+        loss='categorical_crossentropy',     # multi-class loss
+        metrics=['accuracy']
+    )
+    return model
+
+
+# ============================================================
+# CALLBACKS
+# Stop early if no improvement; save best weights; reduce LR
+# ============================================================
+
+def get_callbacks(model_name="cnn_scratch_best.keras"):
+    callbacks = [
+
+        # Stop training if val_loss doesn't improve for 5 epochs
+        EarlyStopping(
+            monitor='val_loss',
+            patience=5,
+            restore_best_weights=True,
+            verbose=1
+        ),
+
+        # Save the best model weights automatically
+        ModelCheckpoint(
+            filepath=model_name,
+            monitor='val_accuracy',
+            save_best_only=True,
+            verbose=1
+        ),
+
+        # Reduce learning rate when val_loss plateaus
+        ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=3,
+            min_lr=1e-6,
+            verbose=1
+        )
+    ]
+    return callbacks
+
+
+# ============================================================
+# TRAIN MODEL
+# ============================================================
+
+def train_cnn(model, train_data, val_data, epochs=EPOCHS):
+    """
+    Train the CNN and record training time.
+    Returns: history object + elapsed time in seconds
+    """
+    callbacks = get_callbacks()
+
+    print("\n" + "=" * 55)
+    print("TRAINING — CNN from Scratch")
+    print("=" * 55)
+
+    start_time = time.time()
+
+    history = model.fit(
+        train_data,
+        epochs=epochs,
+        validation_data=val_data,
+        callbacks=callbacks,
+        verbose=1
+    )
+
+    elapsed = time.time() - start_time
+
+    print(f"\n  Training completed in {elapsed:.1f} seconds "
+          f"({elapsed / 60:.1f} minutes)")
+
+    return history, elapsed
+
+
+# ============================================================
+# PLOT TRAINING CURVES
+# Required by guidelines: Loss & Accuracy over epochs
+# ============================================================
+
+def plot_training_history(history, model_name="CNN from Scratch"):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # ── Accuracy ───────────────────────────────────────────
+    axes[0].plot(history.history['accuracy'],
+                 label='Train Accuracy', color='steelblue', linewidth=2)
+    axes[0].plot(history.history['val_accuracy'],
+                 label='Val Accuracy', color='orange', linewidth=2)
+    axes[0].set_title(f'{model_name} — Accuracy', fontsize=13, fontweight='bold')
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Accuracy')
+    axes[0].legend()
+    axes[0].grid(alpha=0.3)
+
+    # ── Loss ───────────────────────────────────────────────
+    axes[1].plot(history.history['loss'],
+                 label='Train Loss', color='steelblue', linewidth=2)
+    axes[1].plot(history.history['val_loss'],
+                 label='Val Loss', color='orange', linewidth=2)
+    axes[1].set_title(f'{model_name} — Loss', fontsize=13, fontweight='bold')
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('Loss')
+    axes[1].legend()
+    axes[1].grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("cnn_scratch_training_curves.png", dpi=150)
+    plt.show()
+    print("  Training curves saved → cnn_scratch_training_curves.png\n")
+
+
+# ============================================================
+# EVALUATE ON TEST SET
+# Required by guidelines: Accuracy, Precision, Recall, F1, CM
+# ============================================================
+
+def evaluate_model(model, test_data):
+    """
+    Full evaluation on the held-out test set.
+    Prints: Accuracy, Precision, Recall, F1
+    Plots : Confusion Matrix heatmap
+    """
+    print("\n" + "=" * 55)
+    print("EVALUATION — Test Set")
+    print("=" * 55)
+
+    # ── Predictions ────────────────────────────────────────
+    test_data.reset()
+    y_pred_prob = model.predict(test_data, verbose=1)
+    y_pred      = np.argmax(y_pred_prob, axis=1)
+    y_true      = test_data.classes
+
+    # ── Metrics ────────────────────────────────────────────
+    acc       = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, average='weighted', zero_division=0)
+    recall    = recall_score(y_true, y_pred, average='weighted', zero_division=0)
+    f1        = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+
+    print(f"\n  Accuracy  : {acc:.4f}  ({acc * 100:.2f}%)")
+    print(f"  Precision : {precision:.4f}")
+    print(f"  Recall    : {recall:.4f}")
+    print(f"  F1-Score  : {f1:.4f}")
+
+    # ── Per-class Report ───────────────────────────────────
+    print("\n  Per-Class Classification Report:")
+    print(classification_report(y_true, y_pred, target_names=CLASSES))
+
+    # ── Confusion Matrix ───────────────────────────────────
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt='d',
+        cmap='Blues',
+        xticklabels=CLASSES,
+        yticklabels=CLASSES
+    )
+    plt.title("Confusion Matrix — CNN from Scratch", fontsize=14, fontweight='bold')
+    plt.xlabel("Predicted Label", fontsize=12)
+    plt.ylabel("True Label", fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    plt.savefig("cnn_scratch_confusion_matrix.png", dpi=150)
+    plt.show()
+    print("  Confusion matrix saved → cnn_scratch_confusion_matrix.png\n")
+
+    return {
+        "accuracy"  : acc,
+        "precision" : precision,
+        "recall"    : recall,
+        "f1_score"  : f1
+    }
+
+
+# ============================================================
+# PRINT MODEL SUMMARY (trainable params)
+# ============================================================
+
+def print_model_info(model):
+    print("\n" + "=" * 55)
+    print("MODEL ARCHITECTURE SUMMARY")
+    print("=" * 55)
+    model.summary()
+
+    trainable_params = np.sum([
+        np.prod(w.shape) for w in model.trainable_weights
+    ])
+    print(f"\n  Trainable Parameters : {trainable_params:,}")
+    print()
+
+
+# ============================================================
+# MAIN — Full Pipeline
+# ============================================================
+
+if __name__ == "__main__":
+
+    # ── IMPORT preprocessing_final to get data generators ──
+    # Assumes preprocessing_final.py is in the same folder
+    import sys
+    sys.path.append(".")
+    from preprocessing import build_data_generators, DATASET_PATH
+    print("\n" + "=" * 55)
+    print("  GARBAGE CLASSIFICATION — CNN from Scratch")
+    print("=" * 55 + "\n")
+
+    # 1. Load data
+    print("Loading data generators...")
+    train_data, val_data, test_data = build_data_generators(DATASET_PATH)
+
+    # 2. Build model
+    print("\nBuilding CNN from scratch...")
+    model = build_cnn_from_scratch()
+    model = compile_model(model)
+
+    # 3. Print architecture
+    print_model_info(model)
+
+    # 4. Train
+    history, training_time = train_cnn(model, train_data, val_data, epochs=EPOCHS)
+
+    # 5. Plot training curves
+    plot_training_history(history, model_name="CNN from Scratch")
+
+    # 6. Evaluate on test set
+    results = evaluate_model(model, test_data)
+
+    # 7. Save final results summary
+    print("\n" + "=" * 55)
+    print("FINAL RESULTS SUMMARY — CNN from Scratch")
+    print("=" * 55)
+    print(f"  Training Time : {training_time:.1f}s ({training_time/60:.1f} min)")
+    print(f"  Test Accuracy : {results['accuracy']:.4f}  ({results['accuracy']*100:.2f}%)")
+    print(f"  Precision     : {results['precision']:.4f}")
+    print(f"  Recall        : {results['recall']:.4f}")
+    print(f"  F1-Score      : {results['f1_score']:.4f}")
+    print("=" * 55)
+    print("\n✅ CNN from Scratch — Complete.\n")
+
+    # Save results for comparison table (used later with Transfer Learning)
+    cnn_scratch_results = {
+        "model"         : "CNN from Scratch",
+        "accuracy"      : results['accuracy'],
+        "precision"     : results['precision'],
+        "recall"        : results['recall'],
+        "f1_score"      : results['f1_score'],
+        "training_time" : training_time,
+        "history"       : history
+    }
