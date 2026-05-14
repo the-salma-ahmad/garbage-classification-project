@@ -32,11 +32,11 @@ SmartGarbageClassification/
 │
 ├── deployment/
 │   ├── app.py                                       ← Streamlit web application
-│   ├── requirements.txt                             ← Python dependencies
+│   ├── requirements.txt                             ← Python dependencies for running the Streamlit app
 │   ├── cnn_scratch_best.keras                       ← trained CNN from scratch
 │   └── drive_link_transfer_model_final.keras        ← trained Transfer Learning model drive link (file exceeds 25MB)
 │      
-
+├── requirements.txt                                 ← for running the notebook
 │
 └── README.md
 ```
